@@ -260,11 +260,13 @@ namespace SoulsFormats
                     LayoutIndex = buffer.LayoutIndex;
                     BufferLayout layout = materials[MaterialIndex].Layouts[LayoutIndex];
 
+                    // Demon's Souls FLVER0 always uses a UV factor of 1024 regardless of header
+                    // version (confirmed empirically: verified correct UV alignment against
+                    // several models spanning header versions 0x0E-0x15). The original
+                    // version>=0x12 branch below produced visibly misaligned UVs (textures from
+                    // the wrong region of the atlas) on every Demon's Souls model with header
+                    // version >= 0x12 - it likely only applies to a different FromSoft game.
                     float uvFactor = 1024;
-
-                    // NB hack
-                    if (version >= 0x12 || !br.BigEndian)
-                        uvFactor = 2048;
 
                     Vertices = new List<FLVER.Vertex>(vertexCount);
                     for (int i = 0; i < vertexCount; i++)
@@ -392,9 +394,8 @@ namespace SoulsFormats
                 foreach (FLVER.Vertex vertex in Vertices)
                     vertex.PrepareWrite();
 
+                // Kept in sync with the matching Read() override above - see comment there.
                 float uvFactor = 1024;
-                if (flv.Header.Version >= 0x12 || !bw.BigEndian)
-                    uvFactor = 2048;
 
                 foreach (FLVER.Vertex vertex in Vertices)
                     vertex.Write(bw, flv.Materials[MaterialIndex].Layouts[LayoutIndex], uvFactor);
