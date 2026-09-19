@@ -73,11 +73,16 @@ namespace SoulsFormats
             internal static Param Read(BinaryReaderEx br, List<string> classNames)
             {
                 // Don't @ me.
-                int type = br.GetInt32(br.Position + 0xA);
+                // Peeks past FXSerializable's own per-object header (classNameIndex + version, plus
+                // DS2's length field) to the Type value Deserialize() re-reads as its own first field.
+                // Demon's Souls has no length field there (see FFXDLSE.DemonsSouls) - 4 bytes less.
+                int type = br.GetInt32(br.Position + (DemonsSouls ? 0x6 : 0xA));
+                if (Trace) Console.WriteLine($"{new string(' ', TraceDepth*2)}Param type={type} @0x{br.Position:X}");
                 switch (type)
                 {
                     case 1: return new Param1(br, classNames);
                     case 2: return new Param2(br, classNames);
+                    case 3: return new Param3(br, classNames);
                     case 5: return new Param5(br, classNames);
                     case 6: return new Param6(br, classNames);
                     case 7: return new Param7(br, classNames);
@@ -91,16 +96,29 @@ namespace SoulsFormats
                     case 19: return new Param19(br, classNames);
                     case 20: return new Param20(br, classNames);
                     case 21: return new Param21(br, classNames);
+                    case 31: return new Param31(br, classNames);
+                    case 32: return new Param32(br, classNames);
+                    case 34: return new Param34(br, classNames);
+                    case 35: return new Param35(br, classNames);
                     case 37: return new Param37(br, classNames);
+                    case 39: return new Param39(br, classNames);
                     case 38: return new Param38(br, classNames);
                     case 40: return new Param40(br, classNames);
                     case 41: return new Param41(br, classNames);
+                    case 43: return new Param43(br, classNames);
                     case 44: return new Param44(br, classNames);
                     case 45: return new Param45(br, classNames);
                     case 46: return new Param46(br, classNames);
                     case 47: return new Param47(br, classNames);
+                    case 53: return new Param53(br, classNames);
+                    case 54: return new Param54(br, classNames);
+                    case 56: return new Param56(br, classNames);
                     case 59: return new Param59(br, classNames);
                     case 60: return new Param60(br, classNames);
+                    case 62: return new Param62(br, classNames);
+                    case 65: return new Param65(br, classNames);
+                    case 63: return new Param63(br, classNames);
+                    case 64: return new Param64(br, classNames);
                     case 66: return new Param66(br, classNames);
                     case 68: return new Param68(br, classNames);
                     case 69: return new Param69(br, classNames);
@@ -115,6 +133,12 @@ namespace SoulsFormats
                     case 87: return new Param87(br, classNames);
 
                     default:
+                        if (Trace)
+                        {
+                            long p = br.Position;
+                            byte[] dump = br.GetBytes(p, (int)System.Math.Min(64, br.Length - p));
+                            System.Console.WriteLine($"{new string(' ', TraceDepth*2)}Param type={type} UNIMPLEMENTED @0x{p:X}: {string.Join(" ", System.Array.ConvertAll(dump, b => b.ToString("X2")))}");
+                        }
                         throw new NotImplementedException($"Unimplemented param type: {type}");
                 }
             }
@@ -184,6 +208,46 @@ namespace SoulsFormats
                 bw.WriteInt32(Ints.Count);
                 foreach (int value in Ints)
                     PrimitiveInt.Write(bw, classNames, value);
+            }
+        }
+
+        // Demon's Souls only - not in DS2's switch at all (docs/context.md part 58), same
+        // n-then-n-x-(Tick,Int) shape as Param5/6.
+        public class Param3 : Param
+        {
+            internal override int Type => 3;
+
+            public List<TickInt> TickInts { get; set; }
+
+            public Param3()
+            {
+                TickInts = new List<TickInt>();
+            }
+
+            internal Param3(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                int count = br.ReadInt32();
+                TickInts = new List<TickInt>(count);
+                for (int i = 0; i < count; i++)
+                    TickInts.Add(new TickInt(br, classNames));
+            }
+
+            internal override void AddClassNames(List<string> classNames)
+            {
+                base.AddClassNames(classNames);
+                foreach (TickInt tickInt in TickInts)
+                    tickInt.AddClassNames(classNames);
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(TickInts.Count);
+                foreach (TickInt tickInt in TickInts)
+                    tickInt.Write(bw, classNames);
             }
         }
 
@@ -413,6 +477,10 @@ namespace SoulsFormats
 
             public List<TickFloat3> TickFloat3s { get; set; }
 
+            // Demon's Souls only - type 13 is a plain colour constant there, not DS2's curve
+            // (docs/context.md part 58: a universal type-number offset/reuse is unsafe).
+            public PrimitiveColor Color { get; set; }
+
             public Param13()
             {
                 TickFloat3s = new List<TickFloat3>();
@@ -423,6 +491,11 @@ namespace SoulsFormats
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
                 base.Deserialize(br, classNames);
+                if (DemonsSouls)
+                {
+                    Color = new PrimitiveColor(br, classNames);
+                    return;
+                }
                 int count = br.ReadInt32();
                 TickFloat3s = new List<TickFloat3>(count);
                 for (int i = 0; i < count; i++)
@@ -432,6 +505,11 @@ namespace SoulsFormats
             internal override void AddClassNames(List<string> classNames)
             {
                 base.AddClassNames(classNames);
+                if (DemonsSouls)
+                {
+                    Color.AddClassNames(classNames);
+                    return;
+                }
                 foreach (TickFloat3 tickFloat3 in TickFloat3s)
                     tickFloat3.AddClassNames(classNames);
             }
@@ -439,6 +517,11 @@ namespace SoulsFormats
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
             {
                 base.Serialize(bw, classNames);
+                if (DemonsSouls)
+                {
+                    Color.Write(bw, classNames);
+                    return;
+                }
                 bw.WriteInt32(TickFloat3s.Count);
                 foreach (TickFloat3 tickFloat3 in TickFloat3s)
                     tickFloat3.Write(bw, classNames);
@@ -667,6 +750,380 @@ namespace SoulsFormats
             }
         }
 
+        // Demon's Souls-only types, shapes from an independent corpus-wide research pass
+        // (docs/context.md part 57/58) - not present in DS2's own switch at all. 31/32 mirror
+        // DS2's Param37/38 shape exactly (effect/action ID + a nested ParamList - the real
+        // termination rule DS2 already uses, count-delimited, no offset jump), just at different
+        // type numbers; 39/43/53 are plain (int32, int32) binding pairs like several DS2 types
+        // already handle for their own numbers.
+        public class Param31 : Param
+        {
+            internal override int Type => 31;
+
+            [XmlAttribute]
+            public int EffectID { get; set; }
+
+            public ParamList ParamList { get; set; }
+
+            public Param31()
+            {
+                ParamList = new ParamList();
+            }
+
+            internal Param31(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                EffectID = br.ReadInt32();
+                ParamList = new ParamList(br, classNames);
+            }
+
+            internal override void AddClassNames(List<string> classNames)
+            {
+                base.AddClassNames(classNames);
+                ParamList.AddClassNames(classNames);
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(EffectID);
+                ParamList.Write(bw, classNames);
+            }
+        }
+
+        public class Param32 : Param
+        {
+            internal override int Type => 32;
+
+            [XmlAttribute]
+            public int ActionID { get; set; }
+
+            public ParamList ParamList { get; set; }
+
+            public Param32()
+            {
+                ParamList = new ParamList();
+            }
+
+            internal Param32(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                ActionID = br.ReadInt32();
+                ParamList = new ParamList(br, classNames);
+            }
+
+            internal override void AddClassNames(List<string> classNames)
+            {
+                base.AddClassNames(classNames);
+                ParamList.AddClassNames(classNames);
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(ActionID);
+                ParamList.Write(bw, classNames);
+            }
+        }
+
+        public class Param39 : Param
+        {
+            internal override int Type => 39;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param39() { }
+
+            internal Param39(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param43 : Param
+        {
+            internal override int Type => 43;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param43() { }
+
+            internal Param43(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param53 : Param
+        {
+            internal override int Type => 53;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param53() { }
+
+            internal Param53(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param34 : Param
+        {
+            internal override int Type => 34;
+
+            [XmlAttribute]
+            public int TextureID { get; set; }
+
+            public Param34() { }
+
+            internal Param34(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                TextureID = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(TextureID);
+            }
+        }
+
+        public class Param35 : Param
+        {
+            internal override int Type => 35;
+
+            [XmlAttribute]
+            public int ModelID { get; set; }
+
+            public Param35() { }
+
+            internal Param35(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                ModelID = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(ModelID);
+            }
+        }
+
+        public class Param54 : Param
+        {
+            internal override int Type => 54;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param54() { }
+
+            internal Param54(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param65 : Param
+        {
+            internal override int Type => 65;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param65() { }
+
+            internal Param65(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param56 : Param
+        {
+            internal override int Type => 56;
+
+            [XmlAttribute]
+            public int Unk04 { get; set; }
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
+            public Param56() { }
+
+            internal Param56(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Unk04 = br.ReadInt32();
+                Unk08 = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(Unk04);
+                bw.WriteInt32(Unk08);
+            }
+        }
+
+        public class Param62 : Param
+        {
+            internal override int Type => 62;
+
+            [XmlAttribute]
+            public int SoundID { get; set; }
+
+            public Param62() { }
+
+            internal Param62(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                SoundID = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(SoundID);
+            }
+        }
+
+        public class Param63 : Param
+        {
+            internal override int Type => 63;
+
+            [XmlAttribute]
+            public int AnimationResource { get; set; }
+
+            public Param63() { }
+
+            internal Param63(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                AnimationResource = br.ReadInt32();
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                bw.WriteInt32(AnimationResource);
+            }
+        }
+
+        public class Param64 : Param
+        {
+            internal override int Type => 64;
+
+            [XmlAttribute]
+            public float Tick { get; set; }
+
+            public Param64() { }
+
+            internal Param64(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
+
+            protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
+            {
+                base.Deserialize(br, classNames);
+                Tick = PrimitiveTick.Read(br, classNames);
+            }
+
+            internal override void AddClassNames(List<string> classNames)
+            {
+                base.AddClassNames(classNames);
+                PrimitiveTick.AddClassName(classNames);
+            }
+
+            protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
+            {
+                base.Serialize(bw, classNames);
+                PrimitiveTick.Write(bw, classNames, Tick);
+            }
+        }
+
         public class Param37 : Param
         {
             internal override int Type => 37;
@@ -704,6 +1161,11 @@ namespace SoulsFormats
             }
         }
 
+        // Type 38/40/41 mean something different in Demon's Souls than in DS2 despite sharing a
+        // number - confirmed by an independent corpus-wide research pass (docs/context.md part 58):
+        // all three are plain (int32, int32) binding pairs in DeS, not DS2's ActionID+ParamList (38)
+        // or single-int (40/41). A universal type-number offset/reuse is unsafe in general - see
+        // that entry - so these branch on DemonsSouls rather than reinterpreting the DS2 fields.
         public class Param38 : Param
         {
             internal override int Type => 38;
@@ -712,6 +1174,9 @@ namespace SoulsFormats
             public int ActionID { get; set; }
 
             public ParamList ParamList { get; set; }
+
+            [XmlAttribute]
+            public int ArgIndex { get; set; }
 
             public Param38()
             {
@@ -723,21 +1188,33 @@ namespace SoulsFormats
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
                 base.Deserialize(br, classNames);
-                ActionID = br.ReadInt32();
-                ParamList = new ParamList(br, classNames);
+                if (DemonsSouls)
+                {
+                    ActionID = br.ReadInt32();
+                    ArgIndex = br.ReadInt32();
+                }
+                else
+                {
+                    ActionID = br.ReadInt32();
+                    ParamList = new ParamList(br, classNames);
+                }
             }
 
             internal override void AddClassNames(List<string> classNames)
             {
                 base.AddClassNames(classNames);
-                ParamList.AddClassNames(classNames);
+                if (!DemonsSouls)
+                    ParamList.AddClassNames(classNames);
             }
 
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
             {
                 base.Serialize(bw, classNames);
                 bw.WriteInt32(ActionID);
-                ParamList.Write(bw, classNames);
+                if (DemonsSouls)
+                    bw.WriteInt32(ArgIndex);
+                else
+                    ParamList.Write(bw, classNames);
             }
         }
 
@@ -748,6 +1225,9 @@ namespace SoulsFormats
             [XmlAttribute]
             public int TextureID { get; set; }
 
+            [XmlAttribute]
+            public int ArgIndex { get; set; }
+
             public Param40() { }
 
             internal Param40(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
@@ -756,12 +1236,16 @@ namespace SoulsFormats
             {
                 base.Deserialize(br, classNames);
                 TextureID = br.ReadInt32();
+                if (DemonsSouls)
+                    ArgIndex = br.ReadInt32();
             }
 
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
             {
                 base.Serialize(bw, classNames);
                 bw.WriteInt32(TextureID);
+                if (DemonsSouls)
+                    bw.WriteInt32(ArgIndex);
             }
         }
 
@@ -772,6 +1256,9 @@ namespace SoulsFormats
             [XmlAttribute]
             public int Unk04 { get; set; }
 
+            [XmlAttribute]
+            public int ArgIndex { get; set; }
+
             public Param41() { }
 
             internal Param41(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
@@ -780,12 +1267,16 @@ namespace SoulsFormats
             {
                 base.Deserialize(br, classNames);
                 Unk04 = br.ReadInt32();
+                if (DemonsSouls)
+                    ArgIndex = br.ReadInt32();
             }
 
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
             {
                 base.Serialize(bw, classNames);
                 bw.WriteInt32(Unk04);
+                if (DemonsSouls)
+                    bw.WriteInt32(ArgIndex);
             }
         }
 
@@ -973,6 +1464,11 @@ namespace SoulsFormats
             [XmlAttribute]
             public int ArgIndex { get; set; }
 
+            // Demon's Souls only - a genuine third field DS2's type 66 doesn't have (docs/context.md
+            // part 58; not established as a multiplier/divisor, preserved without an operator).
+            [XmlAttribute]
+            public int Unk08 { get; set; }
+
             public Param66() { }
 
             internal Param66(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
@@ -982,6 +1478,8 @@ namespace SoulsFormats
                 base.Deserialize(br, classNames);
                 Unk04 = br.ReadInt32();
                 ArgIndex = br.ReadInt32();
+                if (DemonsSouls)
+                    Unk08 = br.ReadInt32();
             }
 
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
@@ -989,6 +1487,8 @@ namespace SoulsFormats
                 base.Serialize(bw, classNames);
                 bw.WriteInt32(Unk04);
                 bw.WriteInt32(ArgIndex);
+                if (DemonsSouls)
+                    bw.WriteInt32(Unk08);
             }
         }
 

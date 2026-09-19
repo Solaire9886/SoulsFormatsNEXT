@@ -58,7 +58,8 @@ namespace SoulsFormats
             internal static Evaluatable Read(BinaryReaderEx br, List<string> classNames)
             {
                 // Don't @ me.
-                int opcode = br.GetInt32(br.Position + 0xA);
+                // See Param.Read's identical peek for why this offset differs in Demon's Souls.
+                int opcode = br.GetInt32(br.Position + (DemonsSouls ? 0x6 : 0xA));
                 switch (opcode)
                 {
                     case 1: return new EvaluatableConstant(br, classNames);

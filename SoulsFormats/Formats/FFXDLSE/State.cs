@@ -27,6 +27,7 @@ namespace SoulsFormats
             {
                 int actionCount = br.ReadInt32();
                 int triggerCount = br.ReadInt32();
+                if (Trace) System.Console.WriteLine($"{new string(' ', TraceDepth*2)}State actionCount={actionCount} triggerCount={triggerCount}");
                 Actions = new List<Action>(actionCount);
                 for (int i = 0; i < actionCount; i++)
                     Actions.Add(new Action(br, classNames));

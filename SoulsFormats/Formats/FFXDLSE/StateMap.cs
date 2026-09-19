@@ -26,6 +26,7 @@ namespace SoulsFormats
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
                 int stateCount = br.ReadInt32();
+                if (Trace) System.Console.WriteLine($"{new string(' ', TraceDepth*2)}StateMap stateCount={stateCount}");
                 States = new List<State>(stateCount);
                 for (int i = 0; i < stateCount; i++)
                     States.Add(new State(br, classNames));

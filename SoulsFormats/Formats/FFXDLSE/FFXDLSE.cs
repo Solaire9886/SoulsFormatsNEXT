@@ -1,13 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Xml;
 using System.Xml.Serialization;
 
 namespace SoulsFormats
 {
     /// <summary>
-    /// An SFX configuration format used in DeS and DS2; only DS2 is supported. Extension: .ffx
+    /// An SFX configuration format used in DeS and DS2. DeS support is partial - see the
+    /// DemonsSouls flag below and Soulbrandt's docs/ARCHITECTURE.md/context.md part 57 for status.
+    /// Extension: .ffx
     /// </summary>
     public partial class FFXDLSE : SoulsFile<FFXDLSE>
     {
@@ -19,28 +22,58 @@ namespace SoulsFormats
             Effect = new FXEffect();
         }
 
+        // Demon's Souls ships a real but distinct earlier revision of this same format under an
+        // all-caps "DLSE" magic (DS2's is mixed-case "DLsE") - a shorter file header (4 bytes of
+        // version info instead of 17) and no per-object length prefix in FXSerializable's own
+        // header (see the DemonsSouls flag there). Confirmed empirically against a real DeS .ffx:
+        // the class-name string table and every class's field layout checked so far are otherwise
+        // identical to the DS2 shape this file already reads.
+        internal static bool DemonsSouls;
+
+        // Diagnostic-only, off by default: prints each object's class/version/position as it's
+        // read, and hex-dumps an unimplemented Param/Evaluatable type's raw bytes instead of just
+        // throwing. Left in place (not stripped after the investigation) because DeS Param types
+        // 31/32 are still genuinely unresolved - see the doc-comment reference above.
+        public static bool Trace;
+        internal static int TraceDepth;
+
         protected override bool Is(BinaryReaderEx br)
         {
             if (br.Length < 4)
                 return false;
 
             string magic = br.GetASCII(0, 4);
-            return magic == "DLsE";
+            return magic == "DLsE" || magic == "DLSE";
         }
 
         protected override void Read(BinaryReaderEx br)
         {
             br.BigEndian = false;
-            br.AssertASCII("DLsE");
-            br.AssertByte(1);
-            br.AssertByte(3);
-            br.AssertByte(0);
-            br.AssertByte(0);
-            br.AssertInt32(0);
-            br.AssertInt32(0);
-            br.AssertByte(0);
-            br.AssertInt32(1);
-            short classNameCount = br.ReadInt16();
+            string magic = br.GetASCII(br.Position, 4);
+            DemonsSouls = magic == "DLSE";
+            br.AssertASCII(magic);
+
+            short classNameCount;
+            if (DemonsSouls)
+            {
+                // 4-byte version pair (major/minor?) in place of DS2's longer fixed sequence below -
+                // read, not asserted, until confirmed constant across more than one captured file.
+                br.ReadInt16();
+                br.ReadInt16();
+                classNameCount = br.ReadInt16();
+            }
+            else
+            {
+                br.AssertByte(1);
+                br.AssertByte(3);
+                br.AssertByte(0);
+                br.AssertByte(0);
+                br.AssertInt32(0);
+                br.AssertInt32(0);
+                br.AssertByte(0);
+                br.AssertInt32(1);
+                classNameCount = br.ReadInt16();
+            }
 
             var classNames = new List<string>(classNameCount);
             for (int i = 0; i < classNameCount; i++)
@@ -49,6 +82,8 @@ namespace SoulsFormats
                 classNames.Add(br.ReadASCII(length));
             }
 
+            if (Trace)
+                Console.WriteLine("classNames: " + string.Join(", ", classNames.Select((n, i) => $"[{i}]{n}")));
             Effect = new FXEffect(br, classNames);
         }
 
@@ -146,17 +181,38 @@ namespace SoulsFormats
 
             internal abstract int Version { get; }
 
+            // The version actually read from disk in DemonsSouls mode (Version above is DS2's
+            // hardcoded expectation, not asserted there). FXEffect uses this - a real, observed
+            // envelope difference, not a guess: version 3 has no trailing byte, version 4 has one
+            // (always 0) - see docs/context.md part 58.
+            internal int ReadVersion;
+
             internal FXSerializable() { }
 
             internal FXSerializable(BinaryReaderEx br, List<string> classNames)
             {
                 long start = br.Position;
                 br.AssertInt16((short)(classNames.IndexOf(ClassName) + 1));
-                br.AssertInt32(Version);
-                int length = br.ReadInt32();
-                Deserialize(br, classNames);
-                if (br.Position != start + length)
-                    throw new InvalidDataException("Failed to read all object data (or read too much of it).");
+                if (DemonsSouls)
+                {
+                    // No length prefix in this earlier revision, and per-class version numbers run
+                    // behind DS2's (e.g. FXEffect is 4 here, 5 there) - read for visibility, not
+                    // asserted, since the full per-class mapping isn't confirmed yet.
+                    int ver = br.ReadInt32();
+                    ReadVersion = ver;
+                    if (Trace) Console.WriteLine($"{new string(' ', TraceDepth*2)}{ClassName} @0x{start:X} ver={ver}");
+                    TraceDepth++;
+                    Deserialize(br, classNames);
+                    TraceDepth--;
+                }
+                else
+                {
+                    br.AssertInt32(Version);
+                    int length = br.ReadInt32();
+                    Deserialize(br, classNames);
+                    if (br.Position != start + length)
+                        throw new InvalidDataException("Failed to read all object data (or read too much of it).");
+                }
             }
 
             protected internal abstract void Deserialize(BinaryReaderEx br, List<string> classNames);

@@ -28,6 +28,7 @@ namespace SoulsFormats
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
                 ID = br.ReadInt32();
+                if (Trace) System.Console.WriteLine($"{new string(' ', TraceDepth*2)}Action ID={ID}");
                 ParamList = new ParamList(br, classNames);
             }
 

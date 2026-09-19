@@ -29,7 +29,12 @@ namespace SoulsFormats
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
                 int paramCount = br.ReadInt32();
-                Unk04 = br.ReadInt32();
+                // Demon's Souls' ParamList (version 1, vs. DS2's 2) has no Unk04 field at all - DS2
+                // apparently added it later. Confirmed empirically: reading it here on a DeS file
+                // consumes the next object's own class-name-index header instead.
+                if (!DemonsSouls)
+                    Unk04 = br.ReadInt32();
+                if (Trace) System.Console.WriteLine($"{new string(' ', TraceDepth*2)}ParamList paramCount={paramCount} unk04={Unk04}");
                 Params = new List<Param>(paramCount);
                 for (int i = 0; i < paramCount; i++)
                     Params.Add(Param.Read(br, classNames));

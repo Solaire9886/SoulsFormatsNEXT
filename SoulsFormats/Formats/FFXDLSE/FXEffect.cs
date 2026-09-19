@@ -24,19 +24,49 @@ namespace SoulsFormats
 
             public ResourceSet ResourceSet { get; set; }
 
+            // Demon's Souls only - 22 effects in the mounted corpus use this envelope instead of the
+            // ordinary one above: an effect that's really 3 (so far always identical) child effects
+            // behind opaque handles, no separate tail of its own (docs/context.md part 58). Which
+            // child the game actually uses/how is not established - preserved losslessly, not
+            // interpreted. AggregateChildren is empty for an ordinary effect.
+            public List<FXEffect> AggregateChildren { get; set; }
+            public List<uint> AggregateHandles { get; set; }
+
             public FXEffect()
             {
                 ParamList1 = new ParamList();
                 ParamList2 = new ParamList();
                 StateMap = new StateMap();
                 ResourceSet = new ResourceSet();
+                AggregateChildren = new List<FXEffect>();
+                AggregateHandles = new List<uint>();
             }
 
             internal FXEffect(BinaryReaderEx br, List<string> classNames) : base(br, classNames) { }
 
             protected internal override void Deserialize(BinaryReaderEx br, List<string> classNames)
             {
-                br.AssertInt32(0);
+                int mode = DemonsSouls ? br.ReadInt32() : 0;
+                if (!DemonsSouls)
+                    br.AssertInt32(0);
+
+                if (mode == 1)
+                {
+                    ID = br.ReadInt32();
+                    br.AssertInt32(0);
+                    br.AssertInt16(2);
+                    int childCount = br.ReadInt32();
+                    AggregateChildren = new List<FXEffect>(childCount);
+                    AggregateHandles = new List<uint>(childCount);
+                    for (int i = 0; i < childCount; i++)
+                    {
+                        br.AssertInt16(1);
+                        AggregateHandles.Add(br.ReadUInt32());
+                        AggregateChildren.Add(new FXEffect(br, classNames));
+                    }
+                    return;
+                }
+
                 ID = br.ReadInt32();
                 br.AssertInt32(0);
                 br.AssertInt32(0);
@@ -50,13 +80,23 @@ namespace SoulsFormats
 
                 StateMap = new StateMap(br, classNames);
                 ResourceSet = new ResourceSet(br, classNames);
-                br.AssertByte(0);
+                // Demon's Souls: version 3 has no trailing byte, version 4 has one (always 0).
+                // DS2's version 5 always has it.
+                if (!DemonsSouls || ReadVersion >= 4)
+                    br.AssertByte(0);
             }
 
             internal override void AddClassNames(List<string> classNames)
             {
                 base.AddClassNames(classNames);
                 DLVector.AddClassNames(classNames);
+
+                if (AggregateChildren.Count > 0)
+                {
+                    foreach (FXEffect child in AggregateChildren)
+                        child.AddClassNames(classNames);
+                    return;
+                }
 
                 ParamList1.AddClassNames(classNames);
                 ParamList2.AddClassNames(classNames);
@@ -67,6 +107,22 @@ namespace SoulsFormats
 
             protected internal override void Serialize(BinaryWriterEx bw, List<string> classNames)
             {
+                if (AggregateChildren.Count > 0)
+                {
+                    bw.WriteInt32(1);
+                    bw.WriteInt32(ID);
+                    bw.WriteInt32(0);
+                    bw.WriteInt16(2);
+                    bw.WriteInt32(AggregateChildren.Count);
+                    for (int i = 0; i < AggregateChildren.Count; i++)
+                    {
+                        bw.WriteInt16(1);
+                        bw.WriteUInt32(AggregateHandles[i]);
+                        AggregateChildren[i].Write(bw, classNames);
+                    }
+                    return;
+                }
+
                 bw.WriteInt32(0);
                 bw.WriteInt32(ID);
                 bw.WriteInt32(0);
